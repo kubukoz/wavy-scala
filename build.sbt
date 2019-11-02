@@ -23,10 +23,10 @@ val commonSettings = Seq(
   scalaVersion := "2.12.10",
   scalacOptions -= "-Xfatal-warnings",
   libraryDependencies ++= Seq(
-    "org.typelevel" %% "cats-effect" % CatsEffectVersion,
-    "co.fs2" %% "fs2-io" % Fs2Version,
-    "io.circe" %% "circe-core" % CirceVersion,
-    "io.circe" %% "circe-generic" % CirceVersion
+    "org.typelevel" %%% "cats-effect" % CatsEffectVersion,
+    "co.fs2" %%% "fs2-core" % Fs2Version,
+    "io.circe" %%% "circe-core" % CirceVersion,
+    "io.circe" %%% "circe-generic" % CirceVersion
   ) ++ compilerPlugins
 )
 
