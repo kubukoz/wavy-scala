@@ -62,13 +62,6 @@ object Composition {
       canvas.height = screen.height.toInt
     }
 
-    val drawBackground: Draw[Unit] = Kleisli { ctx =>
-      SyncIO {
-        ctx.fillStyle = "black"
-        ctx.fillRect(0, 0, screen.width, screen.height)
-      }
-    }
-
     def drawSample(sample: Sample, index: Int): Draw[Unit] = Kleisli { ctx =>
       SyncIO { ctx.lineTo(index.toDouble, (-sample.value + screen.height / 2)) }
     }
@@ -84,11 +77,12 @@ object Composition {
     val drawWave: Draw[Unit] =
       startWave *> samples.traverseWithIndexM(drawSample).void
 
-    setCanvasSize *> get2dContext(canvas).flatTap((drawBackground *> drawWave).run).flatMap { ctx =>
-      SyncIO {
-        ctx.stroke()
-      }
-    }
+    for {
+      _   <- setCanvasSize
+      ctx <- get2dContext(canvas)
+      _   <- drawWave.run(ctx)
+      _   <- SyncIO(ctx.stroke())
+    } yield ()
   }
 
   val SineCanvas: FunctionalComponent[(Screen, List[Sample])] = FunctionalComponent {
