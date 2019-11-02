@@ -65,7 +65,9 @@ val slinkySettings = Seq(
   "client/fullOptJS::webpack"
 )
 
-val client = project.settings(commonSettings).settings(slinkySettings).enablePlugins(ScalaJSBundlerPlugin)
+val shared = project.settings(commonSettings).enablePlugins(ScalaJSPlugin)
+
+val client = project.settings(commonSettings).settings(slinkySettings).dependsOn(shared).enablePlugins(ScalaJSBundlerPlugin)
 
 val app = project
   .settings(commonSettings)
@@ -82,5 +84,6 @@ val app = project
       "io.scalaland" %% "chimney" % "0.3.2"
     ) ++ compilerPlugins
   )
+  .dependsOn(shared)
 
 val root = project.in(file(".")).dependsOn(client).aggregate(client)

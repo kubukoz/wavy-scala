@@ -15,13 +15,14 @@ import org.http4s.server.Server
 import org.http4s.server.blaze.BlazeServerBuilder
 import pureconfig.ConfigSource
 import scala.concurrent.ExecutionContext
+import org.http4s.server.middleware.CORS
 
 class Application[F[_]: ConcurrentEffect: Timer: ContextShift](config: AppConfig)(implicit executionContext: ExecutionContext) {
 
   def makeServer(router: HttpRoutes[F]): Resource[F, Server[F]] =
     BlazeServerBuilder[F]
       .withWebSockets(true)
-      .withHttpApp(router.orNotFound)
+      .withHttpApp(CORS(router.orNotFound, CORS.DefaultCORSConfig.copy(allowedOrigins = Set("localhost:8080"))))
       .withExecutionContext(executionContext)
       .bindHttp(config.http.port, "0.0.0.0")
       .resource

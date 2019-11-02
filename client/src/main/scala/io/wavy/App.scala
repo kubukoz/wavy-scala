@@ -13,12 +13,23 @@ final case class Screen(width: Double, height: Double)
 
 object Composition {
 
+  val useUpdateParams: Parameters => Unit = { params =>
+    useEffect(() => {
+      // axios.put("http://localhost:4000/params", params)
+      println(s"updated params to $params")
+    }, List(params.amplitude, params.noise.factor, params.noise.rate, params.period, params.phase))
+  }
+
   val component: FunctionalComponent[Unit] = FunctionalComponent { _ =>
     val screen = Screen(width = useWindowWidth() min 1000, height = 400)
 
     val (period, setPeriod) = useState(10.0)
     val (amplitude, setAmplitude) = useState(50.0)
     val (phase, setPhase) = useState(0.0)
+
+    val params = Parameters(period, amplitude, phase, Noise(0.0, 0.0))
+
+    useUpdateParams(params)
 
     div(
       Input("Period", period)(setPeriod),
