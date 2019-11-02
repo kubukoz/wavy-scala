@@ -1,6 +1,34 @@
-name := "wavy-scala"
+val CatsEffectVersion = "2.0.0"
+val Fs2Version = "2.0.1"
+val Http4sVersion = "0.21.0-M5"
+val CirceVersion = "0.12.1"
+val DoobieVersion = "0.8.4"
+val FlywayVersion = "5.0.5"
+val LogbackVersion = "1.2.3"
+val ScalaTestVersion = "3.0.8"
+val ScalaCheckVersion = "1.13.4"
 
-scalaVersion := "2.12.10"
+def crossPlugin(x: sbt.librarymanagement.ModuleID) = compilerPlugin(x cross CrossVersion.full)
+
+val compilerPlugins = List(
+  crossPlugin("org.scalamacros" % "paradise" % "2.1.1"),
+  crossPlugin("org.typelevel" % "kind-projector" % "0.11.0"),
+  crossPlugin("com.github.cb372" % "scala-typed-holes" % "0.1.1"),
+  compilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
+)
+
+val commonSettings = Seq(
+  name := "wavy-scala",
+  organization := "io",
+  scalaVersion := "2.12.10",
+  scalacOptions -= "-Xfatal-warnings",
+  libraryDependencies ++= Seq(
+    "org.typelevel" %% "cats-effect" % CatsEffectVersion,
+    "co.fs2" %% "fs2-io" % Fs2Version,
+    "io.circe" %% "circe-core" % CirceVersion,
+    "io.circe" %% "circe-generic" % CirceVersion
+  ) ++ compilerPlugins
+)
 
 val npmDeps = Seq(
   "react" -> "16.11.0",
@@ -37,6 +65,22 @@ val slinkySettings = Seq(
   "client/fullOptJS::webpack"
 )
 
-val client = project.settings(slinkySettings).enablePlugins(ScalaJSBundlerPlugin)
+val client = project.settings(commonSettings).settings(slinkySettings).enablePlugins(ScalaJSBundlerPlugin)
+
+val app = project
+  .settings(commonSettings)
+  .settings(
+    libraryDependencies ++= Seq(
+      "com.github.pureconfig" %% "pureconfig-generic" % "0.12.1",
+      "org.http4s" %% "http4s-blaze-server" % Http4sVersion,
+      "org.http4s" %% "http4s-circe" % Http4sVersion,
+      "org.http4s" %% "http4s-dsl" % Http4sVersion,
+      "org.flywaydb" % "flyway-core" % FlywayVersion,
+      "org.tpolecat" %% "doobie-core" % DoobieVersion,
+      "org.tpolecat" %% "doobie-postgres" % DoobieVersion,
+      "ch.qos.logback" % "logback-classic" % LogbackVersion,
+      "io.scalaland" %% "chimney" % "0.3.2"
+    ) ++ compilerPlugins
+  )
 
 val root = project.in(file(".")).dependsOn(client).aggregate(client)

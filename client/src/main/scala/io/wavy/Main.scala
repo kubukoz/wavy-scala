@@ -1,10 +1,10 @@
 package io.wavy
 
 import scala.scalajs.js
-import scala.scalajs.js.annotation.{JSExportTopLevel, JSImport}
+import scala.scalajs.js.annotation.JSExportTopLevel
+import scala.scalajs.js.annotation.JSImport
 import scala.scalajs.LinkingInfo
 
-import slinky.core._
 import slinky.web.ReactDOM
 import slinky.hot
 
@@ -30,6 +30,6 @@ object Main {
       elem
     }
 
-    ReactDOM.render(App(), container)
+    val _ = ReactDOM.render(App(), container)
   }
 }
