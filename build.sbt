@@ -26,7 +26,8 @@ val commonSettings = Seq(
     "org.typelevel" %%% "cats-effect" % CatsEffectVersion,
     "co.fs2" %%% "fs2-core" % Fs2Version,
     "io.circe" %%% "circe-core" % CirceVersion,
-    "io.circe" %%% "circe-generic" % CirceVersion
+    "io.circe" %%% "circe-generic" % CirceVersion,
+    "org.typelevel" %%% "simulacrum" % "1.0.0"
   ) ++ compilerPlugins
 )
 
@@ -47,7 +48,6 @@ val slinkySettings = Seq(
   libraryDependencies ++= Seq(
     "me.shadaj" %%% "slinky-web" % "0.6.3",
     "me.shadaj" %%% "slinky-hot" % "0.6.3",
-    compilerPlugin("org.scalamacros" % "paradise" % "2.1.1" cross CrossVersion.full),
     "org.scalatest" %%% "scalatest" % "3.0.5" % Test
   ),
   webpack / version := "4.29.6",
