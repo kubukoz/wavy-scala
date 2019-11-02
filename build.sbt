@@ -27,7 +27,10 @@ val commonSettings = Seq(
     "co.fs2" %%% "fs2-core" % Fs2Version,
     "io.circe" %%% "circe-core" % CirceVersion,
     "io.circe" %%% "circe-generic" % CirceVersion,
-    "org.typelevel" %%% "simulacrum" % "1.0.0"
+    "io.circe" %%% "circe-parser" % CirceVersion,
+    "io.circe" %%% "circe-generic-extras" % CirceVersion,
+    "org.typelevel" %%% "simulacrum" % "1.0.0",
+    "io.estatico" %%% "newtype" % "0.4.3"
   ) ++ compilerPlugins
 )
 
@@ -67,7 +70,16 @@ val slinkySettings = Seq(
 
 val shared = project.settings(commonSettings).enablePlugins(ScalaJSPlugin)
 
-val client = project.settings(commonSettings).settings(slinkySettings).dependsOn(shared).enablePlugins(ScalaJSBundlerPlugin)
+val client = project
+  .settings(commonSettings)
+  .settings(
+    slinkySettings,
+    libraryDependencies ++= Seq(
+      "com.softwaremill.sttp" %%% "core" % "1.7.2"
+    )
+  )
+  .dependsOn(shared)
+  .enablePlugins(ScalaJSBundlerPlugin)
 
 val app = project
   .settings(commonSettings)
