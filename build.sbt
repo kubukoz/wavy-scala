@@ -30,7 +30,8 @@ val slinkySettings = Seq(
   webpackConfigFile in Test := Some(baseDirectory.value / "webpack" / "webpack-core.config.js"),
   webpackDevServerExtraArgs in fastOptJS := Seq("--inline", "--hot"),
   webpackBundlingMode in fastOptJS := BundlingMode.LibraryOnly(),
-  requireJsDomEnv in Test := true
+  requireJsDomEnv in Test := true,
+  scalacOptions += "-P:scalajs:sjsDefinedByDefault"
 ) ++ addCommandAlias("dev", ";client/fastOptJS::startWebpackDevServer;~client/fastOptJS") ++ addCommandAlias(
   "build",
   "client/fullOptJS::webpack"
