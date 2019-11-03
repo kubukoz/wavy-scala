@@ -29,6 +29,9 @@ import io.wavy.http.HttpRouter
 import org.http4s.circe.CirceEntityCodec._
 import scala.concurrent.duration._
 import cats.effect.Sync
+import fs2.concurrent.Queue
+import fs2.Pipe
+import cats.effect.concurrent.Ref
 
 trait Sampler[F[_]] {
   def update(params: Parameters): F[Unit]
@@ -54,6 +57,16 @@ object Sampler {
 
 class Application[F[_]: ConcurrentEffect: Timer: ContextShift](config: AppConfig)(implicit executionContext: ExecutionContext) {
 
+  def showRate[A]: Pipe[F, A, A] =
+    stream =>
+      Stream.eval(Ref.of[F, Int](0)).flatMap { ref =>
+        val count = stream.chunks.flatMap(c => Stream.eval_(ref.update(_ + c.size)) ++ Stream.chunk(c))
+
+        val showCounts = Stream.awakeEvery[F](1.second).evalMap(_ => ref.getAndSet(0)).map(_ + " elements/second").showLinesStdOut
+
+        count concurrently showCounts
+      }
+
   def makeServer(router: HttpRoutes[F]): Resource[F, Server[F]] =
     BlazeServerBuilder[F]
       .withWebSockets(true)
@@ -63,7 +76,7 @@ class Application[F[_]: ConcurrentEffect: Timer: ContextShift](config: AppConfig
       .resource
 
   val server: Resource[F, Server[F]] = Resource.suspend {
-    (Sampler.instance[F], SignallingRef[F, Long](100L)).mapN { (sampler, frequencyPerSecond) =>
+    (Sampler.instance[F], SignallingRef[F, Long](0L)).mapN { (sampler, frequencyPerSecond) =>
       def toFrame[A: Encoder](a: A): WebSocketFrame = WebSocketFrame.Text(a.asJson.noSpaces)
 
       makeServer(
@@ -73,16 +86,29 @@ class Application[F[_]: ConcurrentEffect: Timer: ContextShift](config: AppConfig
 
             HttpRoutes.of[F] {
               case GET -> Root / "samples" =>
-                val frames = frequencyPerSecond
-                  .discrete
-                  .switchMap { frequency =>
-                    sampler.samples.metered(1.second / frequency)
-                  }
-                  .chunkN(1000)
-                  .map(_.toList)
-                  .map(toFrame(_))
+                Queue.bounded[F, Unit](10).flatMap { chunkRequests =>
+                  def limiter[A]: Pipe[F, A, A] =
+                    s =>
+                      frequencyPerSecond.discrete.switchMap {
+                        case 0L   => s
+                        case freq => s.metered(1.second / freq)
+                      }
 
-                WebSocketBuilder[F].build(send = frames, receive = _.drain)
+                  val frames =
+                    sampler
+                      .samples
+                      .through(showRate)
+                      .through(limiter)
+                      .groupWithin(1000, 1.second)
+                      .zipLeft(chunkRequests.dequeue)
+                      .map(_.toList)
+                      .map(toFrame(_))
+
+                  WebSocketBuilder[F].build(
+                    send = frames,
+                    receive = _ /* .map("Received chunk request: " + _).showLinesStdOut */.void.through(chunkRequests.enqueue)
+                  )
+                }
               case req @ PUT -> Root / "params" =>
                 req.decode[Parameters] { params =>
                   sampler.update(params) *> NoContent()

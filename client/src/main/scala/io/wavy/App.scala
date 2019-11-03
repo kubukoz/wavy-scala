@@ -23,6 +23,11 @@ import org.scalajs.dom.raw.HTMLCanvasElement
 import cats.effect.SyncIO
 import org.scalajs.dom.raw.CanvasRenderingContext2D
 import cats.data.Kleisli
+import fs2.concurrent.Queue
+import org.scalajs.dom.raw.MessageEvent
+import scala.scalajs.js.typedarray.ArrayBuffer
+import cats.Foldable
+import cats.Traverse
 
 final case class Screen(width: Double, height: Double)
 
@@ -56,7 +61,7 @@ object Composition {
   def get2dContext(canvas: HTMLCanvasElement): SyncIO[CanvasRenderingContext2D] =
     SyncIO(canvas.getContext("2d").asInstanceOf[CanvasRenderingContext2D])
 
-  def renderCanvas(canvas: HTMLCanvasElement, screen: Screen, samples: List[Sample]): SyncIO[Unit] = {
+  def renderCanvas[F[_]: Traverse](canvas: HTMLCanvasElement, screen: Screen, samples: F[Sample]): SyncIO[Unit] = {
     val setCanvasSize = SyncIO {
       canvas.width = screen.width.toInt
       canvas.height = screen.height.toInt
@@ -85,15 +90,62 @@ object Composition {
     } yield ()
   }
 
-  val SineCanvas: FunctionalComponent[(Screen, List[Sample])] = FunctionalComponent {
-    case (screen, samples) =>
-      val c = useRef(none[HTMLCanvasElement])
+  val SineCanvas: FunctionalComponent[Screen] = FunctionalComponent { screen =>
+    val c = useRef(none[HTMLCanvasElement])
 
-      c.current.traverse(renderCanvas(_, screen, samples)).unsafeRunSync()
+    useEffect(() => {
+      val (ws, q) = Queue
+        .in[SyncIO]
+        .bounded[IO, Sample](screen.width.toInt * 2)
+        .flatMap {
+          q =>
+            def requestMore(ws: WebSocket): SyncIO[Unit] = SyncIO(ws.send(""))
 
-      canvas(
-        ref := (r => c.current = Some(r))
-      )
+            def handle(ws: WebSocket, e: MessageEvent) =
+              fs2
+                .Stream
+                .evalSeq(io.circe.parser.decode[List[Sample]](e.data.asInstanceOf[String]).liftTo[IO])
+                .through(q.enqueue)
+                .compile
+                .drain *> requestMore(ws).toIO
+
+            SyncIO(new WebSocket("ws://localhost:4000/samples"))
+              .flatTap { ws =>
+                SyncIO {
+                  ws.onmessage = handle(ws, _).unsafeRunAsyncAndForget()
+                  ws.onopen = _ => requestMore(ws).unsafeRunSync()
+                }
+              }
+              .tupleRight(q)
+        }
+        .unsafeRunSync()
+
+      import scala.concurrent.duration._
+      val process = q
+        .dequeue
+        .metered(1.second / 10000)
+        // .map(List(_))
+        // .groupWithin(screen.width.toInt, 1.second)
+        .sliding(screen.width.toInt)
+        .evalMap { samples =>
+          IO(c.current).flatMap(_.liftTo[IO](new Throwable("nope"))).flatMap { canvas =>
+            renderCanvas(canvas, screen, samples).toIO
+          }
+        }
+        .compile
+        .drain
+        .start
+        .unsafeRunSync()
+
+      () => {
+        process.cancel.unsafeRunAsyncAndForget()
+        ws.close()
+      }
+    }, List(screen.width))
+
+    canvas(
+      ref := (r => c.current = Some(r))
+    )
   }
 
   val component: FunctionalComponent[Unit] = FunctionalComponent { _ =>
@@ -103,27 +155,17 @@ object Composition {
     val (amplitude, setAmplitude) = useState(50.0)
     val (phase, setPhase) = useState(0.0)
 
-    val (samples, setSamples) = useState(List.empty[Sample])
+    // val (samples, setSamples) = useState(List.empty[Sample])
 
-    println(s"Got ${samples.size} samples")
-    def appendMaxLength[A](old: List[A], newer: List[A], maxLength: Int): List[A] = (old ++ newer).takeRight(maxLength)
+    // println(s"Got ${samples.size} samples")
+    // def appendMaxLength[A](old: List[A], newer: List[A], maxLength: Int): List[A] = (old ++ newer).takeRight(maxLength)
 
     val params = Parameters(period, amplitude, phase, Noise(0.0, 0.0))
 
-    useEffect(() => {
-      val ws = new WebSocket("ws://localhost:4000/samples")
-      ws.onmessage = e => {
-        io.circe.parser.decode[List[Sample]](e.data.asInstanceOf[String]).foreach { newSamples =>
-          setSamples(appendMaxLength(_, newSamples, screen.width.toInt))
-        }
-      }
-
-      () => ws.close()
-    }, List(screen.width))
     useUpdateParams(params)
 
     div(
-      SineCanvas((screen, samples)),
+      SineCanvas(screen),
       Input("Period", period)(setPeriod),
       Input("Amplitude", amplitude)(setAmplitude),
       Input("Phase", phase)(setPhase),
