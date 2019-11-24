@@ -25,9 +25,9 @@ import org.scalajs.dom.raw.CanvasRenderingContext2D
 import cats.data.Kleisli
 import fs2.concurrent.Queue
 import org.scalajs.dom.raw.MessageEvent
-import scala.scalajs.js.typedarray.ArrayBuffer
-import cats.Foldable
 import cats.Traverse
+import fs2.Stream
+import cats.effect.SyncIOInstances
 
 final case class Screen(width: Double, height: Double)
 
@@ -90,61 +90,59 @@ object Composition {
     } yield ()
   }
 
-  val SineCanvas: FunctionalComponent[Screen] = FunctionalComponent { screen =>
-    val c = useRef(none[HTMLCanvasElement])
+  def clientProcess(screen: Screen, canvas: HTMLCanvasElement): SyncIO[(IO[Unit], WebSocket)] =
+    Queue.in[SyncIO].bounded[IO, Sample](screen.width.toInt * 2).flatMap { q =>
+      val ws = SyncIO(new WebSocket("ws://localhost:4000/samples")).flatTap { ws =>
+        val requestMore: SyncIO[Unit] = SyncIO(ws.send(""))
 
-    useEffect(() => {
-      val (ws, q) = Queue
-        .in[SyncIO]
-        .bounded[IO, Sample](screen.width.toInt * 2)
-        .flatMap {
-          q =>
-            def requestMore(ws: WebSocket): SyncIO[Unit] = SyncIO(ws.send(""))
+        val handle: MessageEvent => IO[Unit] =
+          _.data match {
+            case data: String =>
+              val pushToQueue = Stream.evalSeq(io.circe.parser.decode[List[Sample]](data).liftTo[IO]).through(q.enqueue).compile.drain
+              pushToQueue *> requestMore.toIO
 
-            def handle(ws: WebSocket, e: MessageEvent) =
-              fs2
-                .Stream
-                .evalSeq(io.circe.parser.decode[List[Sample]](e.data.asInstanceOf[String]).liftTo[IO])
-                .through(q.enqueue)
-                .compile
-                .drain *> requestMore(ws).toIO
+            case _ => IO.raiseError(new Throwable("Message data wasn't a string"))
+          }
 
-            SyncIO(new WebSocket("ws://localhost:4000/samples"))
-              .flatTap { ws =>
-                SyncIO {
-                  ws.onmessage = handle(ws, _).unsafeRunAsyncAndForget()
-                  ws.onopen = _ => requestMore(ws).unsafeRunSync()
-                }
-              }
-              .tupleRight(q)
+        SyncIO {
+          ws.onmessage = handle(_).unsafeRunAsyncAndForget()
+          ws.onopen = _ => requestMore.unsafeRunSync()
         }
-        .unsafeRunSync()
+      }
 
       import scala.concurrent.duration._
+
       val process = q
         .dequeue
-        .metered(1.second / 10000)
-        // .map(List(_))
-        // .groupWithin(screen.width.toInt, 1.second)
         .sliding(screen.width.toInt)
+        .metered(1.second / 60)
         .evalMap { samples =>
-          IO(c.current).flatMap(_.liftTo[IO](new Throwable("nope"))).flatMap { canvas =>
-            renderCanvas(canvas, screen, samples).toIO
-          }
+          renderCanvas(canvas, screen, samples).toIO
         }
         .compile
         .drain
-        .start
-        .unsafeRunSync()
+
+      ws.tupleLeft(process)
+    }
+
+  val SineCanvas: FunctionalComponent[Screen] = FunctionalComponent { screen =>
+    val canvasRef = useRef(none[HTMLCanvasElement])
+
+    useEffect(() => {
+      val canvas = canvasRef.current.getOrElse(throw new Exception("No canvas!"))
+
+      val (process, ws) = clientProcess(screen, canvas).unsafeRunSync()
+
+      val processFiber = process.start.unsafeRunSync()
 
       () => {
-        process.cancel.unsafeRunAsyncAndForget()
+        processFiber.cancel.unsafeRunAsyncAndForget()
         ws.close()
       }
     }, List(screen.width))
 
     canvas(
-      ref := (r => c.current = Some(r))
+      ref := (r => canvasRef.current = Some(r))
     )
   }
 
@@ -154,11 +152,6 @@ object Composition {
     val (period, setPeriod) = useState(10.0)
     val (amplitude, setAmplitude) = useState(50.0)
     val (phase, setPhase) = useState(0.0)
-
-    // val (samples, setSamples) = useState(List.empty[Sample])
-
-    // println(s"Got ${samples.size} samples")
-    // def appendMaxLength[A](old: List[A], newer: List[A], maxLength: Int): List[A] = (old ++ newer).takeRight(maxLength)
 
     val params = Parameters(period, amplitude, phase, Noise(0.0, 0.0))
 
@@ -178,6 +171,7 @@ object App {
 
   val component: FunctionalComponent[Unit] = FunctionalComponent { _ =>
     val css = AppCSS
+    val _ = css
 
     div(className := "App")(
       header(className := "App-header")(

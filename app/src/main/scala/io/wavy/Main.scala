@@ -28,10 +28,10 @@ import io.circe.syntax._
 import io.wavy.http.HttpRouter
 import org.http4s.circe.CirceEntityCodec._
 import scala.concurrent.duration._
-import cats.effect.Sync
 import fs2.concurrent.Queue
 import fs2.Pipe
 import cats.effect.concurrent.Ref
+import cats.effect.Sync
 
 trait Sampler[F[_]] {
   def update(params: Parameters): F[Unit]
@@ -76,8 +76,8 @@ class Application[F[_]: ConcurrentEffect: Timer: ContextShift](config: AppConfig
       .resource
 
   val server: Resource[F, Server[F]] = Resource.suspend {
-    (Sampler.instance[F], SignallingRef[F, Long](0L)).mapN { (sampler, frequencyPerSecond) =>
-      def toFrame[A: Encoder](a: A): WebSocketFrame = WebSocketFrame.Text(a.asJson.noSpaces)
+    Sampler.instance[F].map { sampler =>
+      def toFrames[A: Encoder]: Pipe[F, A, WebSocketFrame] = _.map(a => WebSocketFrame.Text(a.asJson.noSpaces))
 
       makeServer(
         HttpRouter
@@ -87,35 +87,25 @@ class Application[F[_]: ConcurrentEffect: Timer: ContextShift](config: AppConfig
             HttpRoutes.of[F] {
               case GET -> Root / "samples" =>
                 Queue.bounded[F, Unit](10).flatMap { chunkRequests =>
-                  def limiter[A]: Pipe[F, A, A] =
-                    s =>
-                      frequencyPerSecond.discrete.switchMap {
-                        case 0L   => s
-                        case freq => s.metered(1.second / freq)
-                      }
-
                   val frames =
                     sampler
                       .samples
                       .through(showRate)
-                      .through(limiter)
                       .groupWithin(1000, 1.second)
                       .zipLeft(chunkRequests.dequeue)
                       .map(_.toList)
-                      .map(toFrame(_))
+                      .through(toFrames)
 
                   WebSocketBuilder[F].build(
-                    send = frames,
-                    receive = _ /* .map("Received chunk request: " + _).showLinesStdOut */.void.through(chunkRequests.enqueue)
+                    send = Stream.eval_(Sync[F].delay(println("Subscriber joined"))) ++ frames
+                      .onFinalize(Sync[F].delay(println("Disconnected"))),
+                    receive = _.map("Received chunk request: " + _).showLinesStdOut.void.through(chunkRequests.enqueue)
                   )
                 }
               case req @ PUT -> Root / "params" =>
                 req.decode[Parameters] { params =>
                   sampler.update(params) *> NoContent()
                 }
-
-              case PUT -> Root / "frequency" / freq =>
-                Sync[F].delay(freq.toLong).flatMap(frequencyPerSecond.set) *> NoContent()
             }
           }
           .routes
