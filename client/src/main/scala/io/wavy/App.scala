@@ -8,13 +8,12 @@ import components.Input
 import resources.AppCSS
 import resources.ReactLogo
 import hooks._
-import io.circe.syntax._
 import sttp.client._
+import sttp.client.circe._
 import cats.effect.IO
 import cats.effect.ContextShift
 import scala.concurrent.ExecutionContext
 import cats.effect.Timer
-import io.circe.Encoder
 import org.scalajs.dom.raw.WebSocket
 import io.wavy.newtypes.Sample
 import org.scalajs.dom.raw.HTMLCanvasElement
@@ -41,14 +40,13 @@ object Composition {
   val backend = FetchBackend()
   def sendRequest[T](req: Request[T, Nothing]): IO[Response[T]] = IO.fromFuture(IO(backend.send(req)))
 
-  def sendJSON[T: Encoder](req: Request[_, Nothing], t: T): IO[Unit] =
-    sendRequest(req.contentType("application/json").body(t.asJson.noSpaces)).void
-
   val useUpdateParams: Parameters => Unit = params => {
     val asList = List(params.amplitude, params.noise.factor, params.noise.rate, params.period, params.phase)
 
+    val req = basicRequest.put(uri"http://localhost:4000/params").body(params).response(ignore)
+
     useIO {
-      sendJSON(basicRequest.put(uri"http://localhost:4000/params"), params).void
+      sendRequest(req).map(_.body)
     }(asList)
   }
 
