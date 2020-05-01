@@ -51,7 +51,7 @@ val slinkySettings = Seq(
     "org.scalatest" %%% "scalatest" % ScalaTestVersion % Test
   ),
   webpack / version := "4.29.6",
-  startWebpackDevServer / version := "3.2.1",
+  startWebpackDevServer / version := "3.3.0",
   webpackResources := baseDirectory.value / "webpack" * "*",
   fastOptJS / webpackConfigFile := Some(baseDirectory.value / "webpack" / "webpack-fastopt.config.js"),
   fullOptJS / webpackConfigFile := Some(baseDirectory.value / "webpack" / "webpack-opt.config.js"),
