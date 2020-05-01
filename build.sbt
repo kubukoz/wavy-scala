@@ -72,7 +72,8 @@ val client = project
     slinkySettings,
     libraryDependencies ++= Seq(
       "com.softwaremill.sttp.client" %%% "core" % "2.1.1",
-      "com.softwaremill.sttp.client" %%% "circe" % "2.1.1"
+      "com.softwaremill.sttp.client" %%% "circe" % "2.1.1",
+      "com.softwaremill.sttp.client" %%% "cats" % "2.1.1"
     )
   )
   .dependsOn(shared)

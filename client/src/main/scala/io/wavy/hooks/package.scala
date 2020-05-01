@@ -27,4 +27,17 @@ package object hooks {
 
       () => fiber.cancel.unsafeRunAsyncAndForget()
     }, deps)
+
+  import sttp.client._
+  import sttp.client.circe._
+
+  def useUpdateParams(params: Parameters)(implicit conc: Concurrent[IO], backend: SttpBackend[IO, Nothing, NothingT]): Unit = {
+    val asList = List(params.amplitude, params.noise.factor, params.noise.rate, params.period, params.phase)
+
+    val req = basicRequest.put(uri"http://localhost:4000/params").body(params).response(ignore)
+
+    useIO {
+      backend.send(req).map(_.body)
+    }(asList)
+  }
 }
