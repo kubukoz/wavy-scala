@@ -28,6 +28,7 @@ import org.scalajs.dom.raw.MessageEvent
 import cats.Traverse
 import fs2.Stream
 import cats.effect.implicits._
+import io.circe.Decoder
 
 final case class Screen(width: Double, height: Double)
 
@@ -89,49 +90,50 @@ object Composition {
     } yield ()
   }
 
-  def clientProcess(screen: Screen, canvas: HTMLCanvasElement): SyncIO[(IO[Unit], WebSocket)] =
-    Queue.in[SyncIO].bounded[IO, Sample](screen.width.toInt * 2).flatMap { q =>
-      val ws = SyncIO(new WebSocket("ws://localhost:4000/samples")).flatTap { ws =>
-        val requestMore: SyncIO[Unit] = SyncIO(ws.send(""))
+  def websocketStream[A: Decoder, B](
+    url: String,
+    bufferSize: Int,
+    requestMore: WebSocket => IO[Unit]
+  )(
+    unpack: A => List[B]
+  ): Stream[IO, B] =
+    Stream.eval(Queue.bounded[IO, B](bufferSize)).flatMap { q =>
+      val handle: WebSocket => MessageEvent => IO[Unit] = ws =>
+        _.data match {
+          case data: String =>
+            val pushToQueue = Stream.evalSeq(io.circe.parser.decode[A](data).liftTo[IO].map(unpack)).through(q.enqueue).compile.drain
+            pushToQueue *> requestMore(ws).toIO
 
-        val handle: MessageEvent => IO[Unit] =
-          _.data match {
-            case data: String =>
-              val pushToQueue = Stream.evalSeq(io.circe.parser.decode[List[Sample]](data).liftTo[IO]).through(q.enqueue).compile.drain
-              pushToQueue *> requestMore.toIO
-
-            case _ => IO.raiseError(new Throwable("Message data wasn't a string"))
-          }
-
-        SyncIO {
-          ws.onmessage = handle(_).unsafeRunAsyncAndForget()
-          ws.onopen = _ => requestMore.unsafeRunSync()
+          case _ => IO.raiseError(new Throwable("Message data wasn't a string"))
         }
-      }
 
-      import scala.concurrent.duration._
-
-      val process = q
-        .dequeue
-        .sliding(screen.width.toInt)
-        .metered(1.second / 60)
-        .evalMap { samples =>
-          renderCanvas(canvas, screen, samples).toIO
+      Stream.bracket(IO(new WebSocket(url)))(ws => IO(ws.close())).evalTap { ws =>
+        IO {
+          ws.onmessage = handle(ws)(_).unsafeRunAsyncAndForget()
+          ws.onopen = _ => requestMore(ws).unsafeRunAsyncAndForget()
         }
-        .compile
-        .drain
-
-      ws.tupleLeft(process)
+      } *> q.dequeue
     }
+
+  import scala.concurrent.duration._
+
+  def clientProcess(screen: Screen, canvas: HTMLCanvasElement): IO[Unit] =
+    websocketStream[List[Sample], Sample]("ws://localhost:4000/samples", screen.width.toInt * 2, ws => IO(ws.send("")))(identity)
+      .sliding(screen.width.toInt)
+      .metered(1.second / 60)
+      .evalMap { samples =>
+        renderCanvas(canvas, screen, samples).toIO
+      }
+      .compile
+      .drain
 
   val SineCanvas: FunctionalComponent[Screen] = FunctionalComponent { screen =>
     val canvasRef = useRef(none[HTMLCanvasElement])
 
     useIO {
       for {
-        canvas        <- IO(canvasRef.current.toRight(new Exception("No canvas!"))).rethrow
-        (process, ws) <- clientProcess(screen, canvas).toIO
-        result        <- process.onCancel(IO(ws.close()))
+        canvas <- IO(canvasRef.current.toRight(new Exception("No canvas!"))).rethrow
+        result <- clientProcess(screen, canvas)
       } yield result
     }(List(screen.width))
 
