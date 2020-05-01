@@ -26,6 +26,11 @@ import cats.Traverse
 import fs2.Stream
 import cats.effect.implicits._
 import io.circe.Decoder
+import cats.effect.Sync
+import algebras._
+import cats.Monad
+import cats.effect.ConcurrentEffect
+import cats.effect.Resource
 
 final case class Screen(width: Double, height: Double)
 
@@ -50,73 +55,79 @@ object Composition {
     }(asList)
   }
 
-  type Draw[A] = Kleisli[SyncIO, CanvasRenderingContext2D, A]
+  type Draw[M[_], A] = Kleisli[M, RenderingContext2D[M], A]
+
+  object Draw {
+    def apply[M[_], A](f: RenderingContext2D[M] => M[A]): Draw[M, A] = Kleisli(f)
+  }
 
   def get2dContext(canvas: HTMLCanvasElement): SyncIO[CanvasRenderingContext2D] =
     SyncIO(canvas.getContext("2d").asInstanceOf[CanvasRenderingContext2D])
 
-  def renderCanvas[F[_]: Traverse](canvas: HTMLCanvasElement, screen: Screen, samples: F[Sample]): SyncIO[Unit] = {
-    val setCanvasSize = SyncIO {
-      canvas.width = screen.width.toInt
-      canvas.height = screen.height.toInt
-    }
-
-    def drawSample(sample: Sample, index: Int): Draw[Unit] = Kleisli { ctx =>
-      SyncIO { ctx.lineTo(index.toDouble, (-sample.value + screen.height / 2)) }
-    }
-
-    val startWave: Draw[Unit] = Kleisli { ctx =>
-      SyncIO {
-        ctx.strokeStyle = "white"
-        ctx.lineWidth = 2.0
-        ctx.beginPath()
-      }
-    }
-
-    val drawWave: Draw[Unit] =
-      startWave *> samples.traverseWithIndexM(drawSample).void
-
+  def renderCanvas[M[_]: Monad: CanvasOps, F[_]: Traverse](screen: Screen)(draw: RenderingContext2D[M] => M[Unit]): M[Unit] =
     for {
-      _   <- setCanvasSize
-      ctx <- get2dContext(canvas)
-      _   <- drawWave.run(ctx)
-      _   <- SyncIO(ctx.stroke())
+      _   <- CanvasOps[M].setHeight(screen.height.toInt)
+      _   <- CanvasOps[M].setWidth(screen.width.toInt)
+      ctx <- CanvasOps[M].get2dContext
+      _   <- draw(ctx)
     } yield ()
+
+  def drawLines[M[_]: RenderingContext2D: Monad, F[_]: Traverse](screen: Screen, samples: F[Sample]): M[Unit] = {
+
+    val startWave: M[Unit] =
+      RenderingContext2D[M].strokeStyle("white") *>
+        RenderingContext2D[M].lineWidth(2.0) *>
+        RenderingContext2D[M].beginPath
+
+    def drawSample(sample: Sample, index: Int): M[Unit] =
+      RenderingContext2D[M].lineTo(index.toDouble, (-sample.value + screen.height / 2))
+
+    startWave *> samples.traverseWithIndexM(drawSample).void
   }
 
   import scala.concurrent.duration._
 
-  def websocketStream[A: Decoder, B](
+  def websocketStream[F[_]: ConcurrentEffect, A: Decoder, B](
     url: String,
-    bufferSize: Int,
-    requestMore: WebSocket => IO[Unit]
+    bufferSize: Int
+  )(
+    requestMore: WebSocket => F[Unit]
   )(
     unpack: A => List[B]
-  ): Stream[IO, B] =
-    Stream.eval(Queue.bounded[IO, B](bufferSize)).flatMap { q =>
-      val handle: WebSocket => MessageEvent => IO[Unit] = ws =>
+  ): Stream[F, B] = {
+    def websocket(handle: WebSocket => MessageEvent => F[Unit]) =
+      Resource.make(Sync[F].delay(new WebSocket(url)))(ws => Sync[F].delay(ws.close())).evalTap { ws =>
+        Sync[F].delay {
+          ws.onmessage = handle(ws)(_).toIO.unsafeRunAsyncAndForget()
+          ws.onopen = _ => requestMore(ws).toIO.unsafeRunAsyncAndForget()
+        }
+      }
+
+    Stream.eval(Queue.bounded[F, B](bufferSize)).flatMap { q =>
+      val handle: WebSocket => MessageEvent => F[Unit] = ws =>
         _.data match {
           case data: String =>
-            val pushToQueue = Stream.evalSeq(io.circe.parser.decode[A](data).liftTo[IO].map(unpack)).through(q.enqueue).compile.drain
-            pushToQueue *> requestMore(ws).toIO
+            val pushToQueue = Stream.evalSeq(io.circe.parser.decode[A](data).liftTo[F].map(unpack)).through(q.enqueue).compile.drain
 
-          case _ => IO.raiseError(new Throwable("Message data wasn't a string"))
+            pushToQueue *> requestMore(ws)
+
+          case _ => new Throwable("Message data wasn't a string").raiseError[F, Unit]
         }
 
-      Stream.bracket(IO(new WebSocket(url)))(ws => IO(ws.close())).evalTap { ws =>
-        IO {
-          ws.onmessage = handle(ws)(_).unsafeRunAsyncAndForget()
-          ws.onopen = _ => requestMore(ws).unsafeRunAsyncAndForget()
-        }
-      } *> q.dequeue
+      Stream.resource(websocket(handle)) *> q.dequeue
     }
+  }
 
-  def clientProcess(screen: Screen, canvas: HTMLCanvasElement): IO[Unit] =
-    websocketStream[List[Sample], Sample]("ws://localhost:4000/samples", screen.width.toInt * 2, ws => IO(ws.send("")))(identity)
+  def clientProcess[M[_]: CanvasOps: ConcurrentEffect: Timer](screen: Screen): M[Unit] =
+    websocketStream[M, List[Sample], Sample](url = "ws://localhost:4000/samples", bufferSize = screen.width.toInt * 2) { ws =>
+      Sync[M].delay(ws.send(""))
+    }(identity)
       .sliding(screen.width.toInt)
       .metered(1.second / 60)
       .evalMap { samples =>
-        renderCanvas(canvas, screen, samples).toIO
+        renderCanvas[M, scala.collection.immutable.Queue](screen) { implicit ctx =>
+          drawLines(screen, samples)
+        }
       }
       .compile
       .drain
@@ -124,12 +135,13 @@ object Composition {
   val SineCanvas: FunctionalComponent[Screen] = FunctionalComponent { screen =>
     val canvasRef = useRef(none[HTMLCanvasElement])
 
-    useIO {
-      for {
-        canvas <- IO(canvasRef.current.toRight(new Exception("No canvas!"))).rethrow
-        result <- clientProcess(screen, canvas)
-      } yield result
-    }(List(screen.width))
+    val downloadAndDraw = IO(canvasRef.current.toRight(new Exception("No canvas!"))).rethrow.flatMap { canvas =>
+      implicit val canvasOps = CanvasOps.fromCanvas[IO](canvas)
+
+      clientProcess[IO](screen)
+    }
+
+    useIO { downloadAndDraw }(List(screen.width))
 
     canvas(
       ref := (r => canvasRef.current = Some(r))
