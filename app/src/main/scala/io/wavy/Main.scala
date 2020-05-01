@@ -62,7 +62,7 @@ class Application[F[_]: ConcurrentEffect: Timer: ContextShift](config: AppConfig
       Stream.eval(Ref.of[F, Int](0)).flatMap { ref =>
         val count = stream.chunks.flatMap(c => Stream.eval_(ref.update(_ + c.size)) ++ Stream.chunk(c))
 
-        val showCounts = Stream.awakeEvery[F](1.second).evalMap(_ => ref.getAndSet(0)).map(_ + " elements/second").showLinesStdOut
+        val showCounts = Stream.awakeEvery[F](1.second).evalMap(_ => ref.getAndSet(0)).map(_ + " samples/second").showLinesStdOut
 
         count concurrently showCounts
       }

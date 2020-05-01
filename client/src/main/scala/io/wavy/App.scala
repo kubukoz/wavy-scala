@@ -27,7 +27,7 @@ import fs2.concurrent.Queue
 import org.scalajs.dom.raw.MessageEvent
 import cats.Traverse
 import fs2.Stream
-import cats.effect.SyncIOInstances
+import cats.effect.implicits._
 
 final case class Screen(width: Double, height: Double)
 
@@ -45,15 +45,14 @@ object Composition {
   def sendJSON[T: Encoder](req: Request[String, Nothing], t: T): IO[Response[String]] =
     sendRequest(req.contentType("application/json").body(t.asJson.noSpaces))
 
-  val useUpdateParams: Parameters => Unit = { params =>
+  val useUpdateParams: Parameters => Unit = params => {
     val asList = List(params.amplitude, params.noise.factor, params.noise.rate, params.period, params.phase)
-    useEffect(() => {
 
+    useIO {
       import com.softwaremill.sttp._
 
-      sendJSON(sttp.put(uri"http://localhost:4000/params"), params).unsafeRunAsyncAndForget()
-
-    }, asList)
+      sendJSON(sttp.put(uri"http://localhost:4000/params"), params).void
+    }(asList)
   }
 
   type Draw[A] = Kleisli[SyncIO, CanvasRenderingContext2D, A]
@@ -128,18 +127,13 @@ object Composition {
   val SineCanvas: FunctionalComponent[Screen] = FunctionalComponent { screen =>
     val canvasRef = useRef(none[HTMLCanvasElement])
 
-    useEffect(() => {
-      val canvas = canvasRef.current.getOrElse(throw new Exception("No canvas!"))
-
-      val (process, ws) = clientProcess(screen, canvas).unsafeRunSync()
-
-      val processFiber = process.start.unsafeRunSync()
-
-      () => {
-        processFiber.cancel.unsafeRunAsyncAndForget()
-        ws.close()
-      }
-    }, List(screen.width))
+    useIO {
+      for {
+        canvas        <- IO(canvasRef.current.toRight(new Exception("No canvas!"))).rethrow
+        (process, ws) <- clientProcess(screen, canvas).toIO
+        result        <- process.onCancel(IO(ws.close()))
+      } yield result
+    }(List(screen.width))
 
     canvas(
       ref := (r => canvasRef.current = Some(r))
