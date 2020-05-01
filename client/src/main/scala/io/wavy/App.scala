@@ -90,6 +90,8 @@ object Composition {
     } yield ()
   }
 
+  import scala.concurrent.duration._
+
   def websocketStream[A: Decoder, B](
     url: String,
     bufferSize: Int,
@@ -114,8 +116,6 @@ object Composition {
         }
       } *> q.dequeue
     }
-
-  import scala.concurrent.duration._
 
   def clientProcess(screen: Screen, canvas: HTMLCanvasElement): IO[Unit] =
     websocketStream[List[Sample], Sample]("ws://localhost:4000/samples", screen.width.toInt * 2, ws => IO(ws.send("")))(identity)
