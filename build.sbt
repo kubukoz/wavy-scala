@@ -1,12 +1,9 @@
-val CatsEffectVersion = "2.0.0"
-val Fs2Version = "2.0.1"
-val Http4sVersion = "0.21.0-M5"
-val CirceVersion = "0.12.1"
-val DoobieVersion = "0.8.4"
-val FlywayVersion = "5.0.5"
+val CatsEffectVersion = "2.1.3"
+val Fs2Version = "2.3.0"
+val Http4sVersion = "0.21.4"
+val CirceVersion = "0.13.0"
 val LogbackVersion = "1.2.3"
-val ScalaTestVersion = "3.0.8"
-val ScalaCheckVersion = "1.13.4"
+val ScalaTestVersion = "3.1.1"
 
 def crossPlugin(x: sbt.librarymanagement.ModuleID) = compilerPlugin(x cross CrossVersion.full)
 
@@ -29,8 +26,8 @@ val commonSettings = Seq(
     "io.circe" %%% "circe-generic" % CirceVersion,
     "io.circe" %%% "circe-parser" % CirceVersion,
     "io.circe" %%% "circe-generic-extras" % CirceVersion,
-    "org.typelevel" %%% "simulacrum" % "1.0.0",
-    "io.estatico" %%% "newtype" % "0.4.3"
+    "org.typelevel" %%% "simulacrum" % "1.0.0"
+    // "io.estatico" %%% "newtype" % "0.4.3" not released for sjs 1.0
   ) ++ compilerPlugins
 )
 
@@ -49,9 +46,9 @@ val npmDeps = Seq(
 val slinkySettings = Seq(
   npmDependencies in Compile ++= npmDeps,
   libraryDependencies ++= Seq(
-    "me.shadaj" %%% "slinky-web" % "0.6.3",
-    "me.shadaj" %%% "slinky-hot" % "0.6.3",
-    "org.scalatest" %%% "scalatest" % "3.0.5" % Test
+    "me.shadaj" %%% "slinky-web" % "0.6.5",
+    "me.shadaj" %%% "slinky-hot" % "0.6.5",
+    "org.scalatest" %%% "scalatest" % ScalaTestVersion % Test
   ),
   webpack / version := "4.29.6",
   startWebpackDevServer / version := "3.2.1",
@@ -61,8 +58,7 @@ val slinkySettings = Seq(
   webpackConfigFile in Test := Some(baseDirectory.value / "webpack" / "webpack-core.config.js"),
   webpackDevServerExtraArgs in fastOptJS := Seq("--inline", "--hot"),
   webpackBundlingMode in fastOptJS := BundlingMode.LibraryOnly(),
-  requireJsDomEnv in Test := true,
-  scalacOptions += "-P:scalajs:sjsDefinedByDefault"
+  requireJsDomEnv in Test := true
 ) ++ addCommandAlias("dev", ";client/fastOptJS::startWebpackDevServer;~client/fastOptJS") ++ addCommandAlias(
   "build",
   "client/fullOptJS::webpack"
@@ -75,7 +71,7 @@ val client = project
   .settings(
     slinkySettings,
     libraryDependencies ++= Seq(
-      "com.softwaremill.sttp" %%% "core" % "1.7.2"
+      "com.softwaremill.sttp.client" %%% "core" % "2.1.1"
     )
   )
   .dependsOn(shared)
@@ -89,11 +85,7 @@ val app = project
       "org.http4s" %% "http4s-blaze-server" % Http4sVersion,
       "org.http4s" %% "http4s-circe" % Http4sVersion,
       "org.http4s" %% "http4s-dsl" % Http4sVersion,
-      "org.flywaydb" % "flyway-core" % FlywayVersion,
-      "org.tpolecat" %% "doobie-core" % DoobieVersion,
-      "org.tpolecat" %% "doobie-postgres" % DoobieVersion,
-      "ch.qos.logback" % "logback-classic" % LogbackVersion,
-      "io.scalaland" %% "chimney" % "0.3.2"
+      "ch.qos.logback" % "logback-classic" % LogbackVersion
     ) ++ compilerPlugins
   )
   .dependsOn(shared)

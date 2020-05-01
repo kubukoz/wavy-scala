@@ -9,10 +9,8 @@ import resources.AppCSS
 import resources.ReactLogo
 import hooks._
 import io.circe.syntax._
-import com.softwaremill.sttp.FetchBackend
+import sttp.client._
 import cats.effect.IO
-import com.softwaremill.sttp.Response
-import com.softwaremill.sttp.Request
 import cats.effect.ContextShift
 import scala.concurrent.ExecutionContext
 import cats.effect.Timer
@@ -43,16 +41,14 @@ object Composition {
   val backend = FetchBackend()
   def sendRequest[T](req: Request[T, Nothing]): IO[Response[T]] = IO.fromFuture(IO(backend.send(req)))
 
-  def sendJSON[T: Encoder](req: Request[String, Nothing], t: T): IO[Response[String]] =
-    sendRequest(req.contentType("application/json").body(t.asJson.noSpaces))
+  def sendJSON[T: Encoder](req: Request[_, Nothing], t: T): IO[Unit] =
+    sendRequest(req.contentType("application/json").body(t.asJson.noSpaces)).void
 
   val useUpdateParams: Parameters => Unit = params => {
     val asList = List(params.amplitude, params.noise.factor, params.noise.rate, params.period, params.phase)
 
     useIO {
-      import com.softwaremill.sttp._
-
-      sendJSON(sttp.put(uri"http://localhost:4000/params"), params).void
+      sendJSON(basicRequest.put(uri"http://localhost:4000/params"), params).void
     }(asList)
   }
 

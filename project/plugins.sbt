@@ -1,7 +1,7 @@
-addSbtPlugin("org.scala-js" % "sbt-scalajs" % "0.6.29")
+addSbtPlugin("org.scala-js" % "sbt-scalajs" % "1.0.1")
 
-addSbtPlugin("ch.epfl.scala" % "sbt-scalajs-bundler" % "0.15.0-0.6")
+addSbtPlugin("ch.epfl.scala" % "sbt-scalajs-bundler" % "0.17.0")
 
-addSbtPlugin("io.github.davidgregory084" % "sbt-tpolecat" % "0.1.8")
+addSbtPlugin("io.github.davidgregory084" % "sbt-tpolecat" % "0.1.11")
 
 addSbtPlugin("ch.epfl.scala" % "sbt-bloop" % "1.3.5")
