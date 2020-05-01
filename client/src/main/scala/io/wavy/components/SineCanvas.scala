@@ -51,7 +51,7 @@ object SineCanvas {
     def drawSample(sample: Sample, index: Int): M[Unit] =
       RenderingContext2D[M].lineTo(index.toDouble, (-sample.value + screen.height / 2))
 
-    startWave *> samples.traverseWithIndexM(drawSample).void
+    startWave *> samples.traverseWithIndexM(drawSample).void *> RenderingContext2D[M].stroke
   }
 
   import scala.concurrent.duration._

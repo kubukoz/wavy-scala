@@ -68,10 +68,9 @@ class Application[F[_]: ConcurrentEffect: Timer: ContextShift](config: AppConfig
       }
 
   def makeServer(router: HttpRoutes[F]): Resource[F, Server[F]] =
-    BlazeServerBuilder[F]
+    BlazeServerBuilder[F](executionContext)
       .withWebSockets(true)
       .withHttpApp(CORS(router.orNotFound, CORS.DefaultCORSConfig.copy(allowedOrigins = Set("localhost:8080"))))
-      .withExecutionContext(executionContext)
       .bindHttp(config.http.port, "0.0.0.0")
       .resource
 
